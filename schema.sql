@@ -198,10 +198,38 @@ begin
     nullif(new.raw_user_meta_data->>'avatar_url',''),
     coalesce((new.raw_user_meta_data->>'discoverable')::boolean,false),
     case when coalesce((new.raw_user_meta_data->>'discoverable')::boolean,false) then now() else null end
-  );
+  )
+  on conflict (id) do update set
+    display_name = excluded.display_name,
+    birthdate = excluded.birthdate,
+    city = excluded.city,
+    neighborhood = excluded.neighborhood,
+    bio = excluded.bio,
+    interests = excluded.interests,
+    vibes = excluded.vibes,
+    avatar_url = excluded.avatar_url,
+    discoverable = excluded.discoverable,
+    consented_at = excluded.consented_at;
   return new;
 end;
 $$;
 
-drop trigger if exists on_auth_user_created_profile on auth.users;
+-- Signup fails with profiles_pkey when more than one trigger inserts a profile.
+do $$
+declare
+  trigger_name text;
+begin
+  for trigger_name in
+    select t.tgname
+    from pg_trigger t
+    join pg_class c on c.oid = t.tgrelid
+    join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'auth'
+      and c.relname = 'users'
+      and not t.tgisinternal
+  loop
+    execute format('drop trigger if exists %I on auth.users', trigger_name);
+  end loop;
+end $$;
+
 create trigger on_auth_user_created_profile after insert on auth.users for each row execute function public.create_profile_for_new_member();
